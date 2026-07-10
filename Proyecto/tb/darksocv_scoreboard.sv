@@ -16,6 +16,10 @@ class darksocv_scoreboard extends uvm_scoreboard;
     int checks_executed;
     int checks_passed;
     int checks_failed;
+    logic [31:0] expected_next_pc;
+    int pc_checks_executed;
+    int pc_checks_passed;
+    int pc_checks_failed;
 
     function new(string name = "darksocv_scoreboard", uvm_component parent = null);
         super.new(name, parent);
@@ -43,6 +47,57 @@ class darksocv_scoreboard extends uvm_scoreboard;
         checks_executed        = 0;
         checks_passed          = 0;
         checks_failed          = 0;
+        expected_next_pc       = 32'h00000000;
+        pc_checks_executed     = 0;
+        pc_checks_passed       = 0;
+        pc_checks_failed       = 0;
+    endfunction
+
+    function logic [31:0] calc_next_pc(darksocv_item item);
+        bit branch_taken;
+
+        case (item.op)
+            OP_JAL: begin
+                return item.pc + item.imm;
+            end
+
+            OP_JALR: begin
+                return (ref_regs[item.rs1] + item.imm) & 32'hffff_fffe;
+            end
+
+            OP_BEQ:  branch_taken = (ref_regs[item.rs1] == ref_regs[item.rs2]);
+            OP_BNE:  branch_taken = (ref_regs[item.rs1] != ref_regs[item.rs2]);
+            OP_BLT:  branch_taken = ($signed(ref_regs[item.rs1]) < $signed(ref_regs[item.rs2]));
+            OP_BGE:  branch_taken = ($signed(ref_regs[item.rs1]) >= $signed(ref_regs[item.rs2]));
+            OP_BLTU: branch_taken = (ref_regs[item.rs1] < ref_regs[item.rs2]);
+            OP_BGEU: branch_taken = (ref_regs[item.rs1] >= ref_regs[item.rs2]);
+
+            default: begin
+                return item.pc + 32'd4;
+            end
+        endcase
+
+        return branch_taken ? (item.pc + item.imm) : (item.pc + 32'd4);
+    endfunction
+
+    function void compare_pc(darksocv_item item);
+        pc_checks_executed++;
+
+        if (item.pc === expected_next_pc) begin
+            pc_checks_passed++;
+            `uvm_info(
+                "SCB_PC",
+                $sformatf("PASS PC instr[%0d]: esperado=0x%08h observado=0x%08h", item.item_index, expected_next_pc, item.pc),
+                UVM_MEDIUM
+            )
+        end
+        else begin
+            pc_checks_failed++;
+            `uvm_error(
+                "SCB_PC",
+                $sformatf("FAIL PC instr[%0d] %s: esperado=0x%08h observado=0x%08h", item.item_index, item.asm_text, expected_next_pc, item.pc)
+            )
+        end
     endfunction
 
     function logic [31:0] calc_result(darksocv_item item);
@@ -163,6 +218,7 @@ class darksocv_scoreboard extends uvm_scoreboard;
 
         `uvm_info("SCB", $sformatf("Instruccion recibida: %s", item.convert2string()), UVM_MEDIUM)
 
+        compare_pc(item);
         expected = calc_result(item);
         item.expected_value = expected;
         expected_observed = (!item.writes_rd() || item.rd == 0) ? 32'h00000000 : expected;
@@ -179,6 +235,7 @@ class darksocv_scoreboard extends uvm_scoreboard;
         )
 
         compare_instruction(item, expected_observed);
+        expected_next_pc = calc_next_pc(item);
 
         if (item.op == OP_SW) begin
             addr = ref_regs[item.rs1] + item.imm;
@@ -270,11 +327,14 @@ class darksocv_scoreboard extends uvm_scoreboard;
         `uvm_info(
             "SCB",
             $sformatf(
-                "Resumen: instrucciones=%0d instr_checks=%0d instr_correctos=%0d instr_fallidos=%0d checks_finales=%0d finales_correctos=%0d finales_fallidos=%0d",
+                "Resumen: instrucciones=%0d instr_checks=%0d instr_correctos=%0d instr_fallidos=%0d pc_checks=%0d pc_correctos=%0d pc_fallidos=%0d checks_finales=%0d finales_correctos=%0d finales_fallidos=%0d",
                 instr_count,
                 instr_checks_executed,
                 instr_checks_passed,
                 instr_checks_failed,
+                pc_checks_executed,
+                pc_checks_passed,
+                pc_checks_failed,
                 checks_executed,
                 checks_passed,
                 checks_failed
@@ -284,6 +344,8 @@ class darksocv_scoreboard extends uvm_scoreboard;
 
         if ((instr_checks_executed == instr_count) &&
             (instr_checks_failed == 0) &&
+            (pc_checks_executed == instr_count) &&
+            (pc_checks_failed == 0) &&
             (checks_executed == 16) &&
             (checks_failed == 0)) begin
             `uvm_info("SCB", "Resultado final: PASS", UVM_MEDIUM)

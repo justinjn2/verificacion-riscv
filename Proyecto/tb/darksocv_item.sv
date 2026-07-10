@@ -78,7 +78,7 @@ class darksocv_item extends uvm_sequence_item;
         (instr_type == INSTR_LOAD)   -> (op == OP_LW);
         (instr_type == INSTR_STORE)  -> (op == OP_SW);
         (instr_type == INSTR_BRANCH) -> (op inside {OP_BEQ, OP_BNE, OP_BLT, OP_BGE, OP_BLTU, OP_BGEU});
-        (instr_type == INSTR_JUMP)   -> (op == OP_JAL);
+        (instr_type == INSTR_JUMP)   -> (op inside {OP_JAL, OP_JALR});
     }
 
     constraint c_reg_range {
@@ -96,7 +96,7 @@ class darksocv_item extends uvm_sequence_item;
         (op == OP_SW) -> (imm inside {[32'd1792:32'd1900]} && imm[1:0] == 2'b00);
         (instr_type == INSTR_BRANCH) -> (imm == 32'd4);
         (op == OP_JAL) -> (imm == 32'd4);
-        (op == OP_JALR) -> (imm == 32'd0);
+        (op == OP_JALR) -> (imm inside {[0:2047]} && imm[0] == 1'b0);
         (instr_type == INSTR_R) -> (imm == 0);
     }
 

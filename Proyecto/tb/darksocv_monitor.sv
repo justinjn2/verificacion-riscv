@@ -219,7 +219,7 @@ class darksocv_monitor extends uvm_monitor;
 
     task check_reg_changes(
         input int cycle_id,
-        input logic [31:0] curr_iaddr,
+        input logic [31:0] curr_exec_pc,
         input logic [31:0] curr_instr_word,
         ref logic [31:0] prev_regs [0:15]
     );
@@ -232,9 +232,9 @@ class darksocv_monitor extends uvm_monitor;
                     `uvm_error(
                         "MON_REG",
                         $sformatf(
-                            "Cambio inesperado en x0: ciclo=%0d IADDR=0x%08h instr_word=0x%08h x0: 0x%08h -> 0x%08h",
+                            "Cambio inesperado en x0: ciclo=%0d EXEC_PC=0x%08h instr_word=0x%08h x0: 0x%08h -> 0x%08h",
                             cycle_id,
-                            curr_iaddr,
+                            curr_exec_pc,
                             curr_instr_word,
                             prev_regs[r],
                             vif.REGS[r]
@@ -245,9 +245,9 @@ class darksocv_monitor extends uvm_monitor;
                     `uvm_info(
                         "MON_REG",
                         $sformatf(
-                            "Cambio de registro: ciclo=%0d IADDR=0x%08h instr_word=0x%08h x%0d: 0x%08h -> 0x%08h",
+                            "Cambio de registro: ciclo=%0d EXEC_PC=0x%08h instr_word=0x%08h x%0d: 0x%08h -> 0x%08h",
                             cycle_id,
-                            curr_iaddr,
+                            curr_exec_pc,
                             curr_instr_word,
                             r,
                             prev_regs[r],
@@ -322,38 +322,33 @@ class darksocv_monitor extends uvm_monitor;
                 continue;
             end
 
-            if ($isunknown(vif.IADDR) || $isunknown(vif.IDATA)) begin
+            if ((vif.EXEC_VALID !== 1'b1) ||
+                $isunknown(vif.EXEC_PC) ||
+                $isunknown(vif.EXEC_INSTR)) begin
                 continue;
             end
 
-            if (vif.IADDR[1:0] != 2'b00) begin
+            if (vif.EXEC_PC[1:0] != 2'b00) begin
                 continue;
             end
 
-            if (vif.IADDR >= 32'd2048) begin
+            if (vif.EXEC_PC >= 32'd2048) begin
                 continue;
             end
 
-            word_index = vif.IADDR[10:2];
-            instr_word = vif.MEM_WORD[word_index];
+            word_index = vif.EXEC_PC[10:2];
+            instr_word = vif.EXEC_INSTR;
 
-            check_reg_changes(reg_cycle, vif.IADDR, instr_word, prev_regs);
+            check_reg_changes(reg_cycle, vif.EXEC_PC, instr_word, prev_regs);
 
             if (seen_iaddr[word_index]) begin
                 continue;
             end
 
-            seen_iaddr[word_index] = 1'b1;
-
             if (instr_word == 32'h0000006F) begin
+                seen_iaddr[word_index] = 1'b1;
                 jal_detected = 1'b1;
                 `uvm_info("MON", "Detectado jal x0, 0 final. Monitor detenido.", UVM_MEDIUM)
-
-                if (pending_q.size() > 0) begin
-                    item = pending_q.pop_front();
-                    publish_item(item);
-                end
-
                 break;
             end
 
@@ -363,8 +358,9 @@ class darksocv_monitor extends uvm_monitor;
             );
 
             if (decode_instr(instr_word, item)) begin
+                seen_iaddr[word_index] = 1'b1;
                 item.item_index         = observed_count;
-                item.pc                 = vif.IADDR;
+                item.pc                 = vif.EXEC_PC;
                 item.is_last            = 1'b0;
                 item.has_final_snapshot = 1'b0;
                 pending_q.push_back(item);
@@ -381,7 +377,9 @@ class darksocv_monitor extends uvm_monitor;
 
                 observed_count++;
 
-                if (pending_q.size() > 3) begin
+                // EXEC_INSTR ya esta en la etapa de ejecucion. Al observar la
+                // siguiente instruccion valida, el writeback anterior ya ocurrio.
+                if (pending_q.size() > 1) begin
                     item = pending_q.pop_front();
                     publish_item(item);
                 end
@@ -403,16 +401,18 @@ class darksocv_monitor extends uvm_monitor;
                 @(posedge vif.XCLK);
                 reg_cycle++;
 
-                if (!$isunknown(vif.IADDR) &&
-                    (vif.IADDR[1:0] == 2'b00) &&
-                    (vif.IADDR < 32'd2048)) begin
-                    instr_word = vif.MEM_WORD[vif.IADDR[10:2]];
+                if ((vif.EXEC_VALID === 1'b1) &&
+                    !$isunknown(vif.EXEC_PC) &&
+                    !$isunknown(vif.EXEC_INSTR) &&
+                    (vif.EXEC_PC[1:0] == 2'b00) &&
+                    (vif.EXEC_PC < 32'd2048)) begin
+                    instr_word = vif.EXEC_INSTR;
                 end
                 else begin
                     instr_word = 32'h00000013;
                 end
 
-                check_reg_changes(reg_cycle, vif.IADDR, instr_word, prev_regs);
+                check_reg_changes(reg_cycle, vif.EXEC_PC, instr_word, prev_regs);
 
                 item = pending_q.pop_front();
 

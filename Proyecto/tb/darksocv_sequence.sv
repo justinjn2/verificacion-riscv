@@ -20,6 +20,11 @@ class darksocv_sequence extends uvm_sequence #(darksocv_item);
 
     task body();
         darksocv_item item;
+        bit enable_directed_jalr;
+
+        enable_directed_jalr = ((seq_mode == MODE_MIXED) ||
+                                (seq_mode == MODE_JUMP)) &&
+                               (num_items >= 7);
 
         for (int i = 0; i < num_items; i++) begin
             item = darksocv_item::type_id::create($sformatf("item_%0d", i));
@@ -35,6 +40,41 @@ class darksocv_sequence extends uvm_sequence #(darksocv_item);
                     imm inside {[1:15]};
                 }) begin
                     `uvm_fatal("SEQ", "No se pudo randomizar darksocv_item")
+                end
+            end
+            else if (enable_directed_jalr && i == 1) begin
+                // AUIPC x15 obtiene PC=4; JALR usara x15 para formar un destino conocido.
+                if (!item.randomize() with {
+                    instr_type == INSTR_U;
+                    op == OP_AUIPC;
+                    rd == 15;
+                    imm == 0;
+                }) begin
+                    `uvm_fatal("SEQ", "No se pudo generar la preparacion dirigida de JALR")
+                end
+            end
+            else if (enable_directed_jalr && (i inside {2, 3, 5})) begin
+                // Dos NOPs evitan dependencia inmediata; el tercero debe ser omitido por JALR.
+                if (!item.randomize() with {
+                    instr_type == INSTR_I;
+                    op == OP_ADDI;
+                    rd == 0;
+                    rs1 == 0;
+                    imm == 0;
+                }) begin
+                    `uvm_fatal("SEQ", "No se pudo generar NOP dirigido para JALR")
+                end
+            end
+            else if (enable_directed_jalr && i == 4) begin
+                // En PC=16: (x15 + 20) & ~1 = 24. Se omite la palabra en PC=20.
+                if (!item.randomize() with {
+                    instr_type == INSTR_JUMP;
+                    op == OP_JALR;
+                    rd == 14;
+                    rs1 == 15;
+                    imm == 20;
+                }) begin
+                    `uvm_fatal("SEQ", "No se pudo generar la instruccion JALR dirigida")
                 end
             end
             else begin
@@ -76,13 +116,17 @@ class darksocv_sequence extends uvm_sequence #(darksocv_item);
                     end
 
                     MODE_JUMP: begin
-                        if (!item.randomize() with { instr_type == INSTR_JUMP; }) begin
+                        if (!item.randomize() with {
+                            instr_type == INSTR_JUMP;
+                            op == OP_JAL;
+                        }) begin
                             `uvm_fatal("SEQ", "No se pudo randomizar instruccion JUMP")
                         end
                     end
 
                     default: begin
-                        if (!item.randomize()) begin
+                        // Los JALR adicionales requeririan preparar individualmente su destino.
+                        if (!item.randomize() with { op != OP_JALR; }) begin
                             `uvm_fatal("SEQ", "No se pudo randomizar darksocv_item")
                         end
                     end

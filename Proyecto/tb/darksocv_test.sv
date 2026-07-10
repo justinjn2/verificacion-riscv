@@ -27,7 +27,8 @@ class darksocv_test extends uvm_test;
         phase.raise_objection(this);
 
         seq = darksocv_sequence::type_id::create("seq");
-        seq.num_items = 400;
+        // Se escriben 401 palabras; el JALR dirigido omite una y quedan 400 ejecutadas.
+        seq.num_items = 401;
 
         if ($value$plusargs("NUM_ITEMS=%0d", plusarg_num_items)) begin
             seq.num_items = plusarg_num_items;

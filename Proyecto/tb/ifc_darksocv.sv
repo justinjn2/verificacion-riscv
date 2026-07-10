@@ -8,13 +8,16 @@ interface ifc_darksocv(input logic XCLK);
     logic [3:0] LED;
     logic [3:0] DEBUG;
 
-    // El monitor observa senales internas como IADDR, IDATA, REGS y MEM_WORD.
+    // El monitor observa bus de fetch, etapa de ejecucion, registros y memoria.
     logic CLK;
     logic RES;
     logic HLT;
     logic [31:0] IADDR;
     logic [31:0] DADDR;
     logic [31:0] IDATA;
+    logic [31:0] EXEC_PC;
+    logic [31:0] EXEC_INSTR;
+    logic EXEC_VALID;
     logic [31:0] DATAO;
     logic [31:0] DATAI;
     logic WR;
